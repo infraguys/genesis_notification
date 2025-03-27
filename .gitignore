@@ -16,6 +16,7 @@ __pycache__/
 # Distribution / packaging
 .Python
 build/
+output/
 develop-eggs/
 dist/
 deps/
@@ -127,3 +128,7 @@ docs/source/*.png
 
 # Vagrant
 .vagrant/
+
+# Configs
+etc/genesis_notification/genesis_notification.conf
+

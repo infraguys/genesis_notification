@@ -18,26 +18,32 @@ import logging
 import sys
 
 from gcl_looper.services import bjoern_service
+from gcl_looper.services import hub
+from gcl_iam import opts as iam_opts
 from oslo_config import cfg
+from restalchemy.common import config_opts as ra_config_opts
 from restalchemy.storage.sql import engines
 
-from genesis_notification.api import app
+from genesis_notification.user_api.api import app
 from genesis_notification.common import config
 from genesis_notification.common import log as infra_log
 
 
 api_cli_opts = [
-    cfg.StrOpt("bind-host", default="127.0.0.1", help="The host IP to bind to"),
-    cfg.IntOpt("bind-port", default=8080, help="The port to bind to"),
-    cfg.IntOpt("workers", default=1, help="How many http servers should be started"),
-]
-
-db_opts = [
     cfg.StrOpt(
-        "connection-url",
-        default="postgresql://genesis_notification:pass"
-        "@127.0.0.1:5432/genesis_notification",
-        help="Connection URL to db",
+        "bind-host",
+        default="127.0.0.1",
+        help="The host IP to bind to",
+    ),
+    cfg.IntOpt(
+        "bind-port",
+        default=8080,
+        help="The port to bind to",
+    ),
+    cfg.IntOpt(
+        "workers",
+        default=1,
+        help="How many http servers should be started",
     ),
 ]
 
@@ -46,7 +52,8 @@ DOMAIN = "user_api"
 
 CONF = cfg.CONF
 CONF.register_cli_opts(api_cli_opts, DOMAIN)
-CONF.register_opts(db_opts, "db")
+ra_config_opts.register_posgresql_db_opts(CONF)
+iam_opts.register_iam_cli_opts(CONF)
 
 
 def main():
@@ -57,18 +64,35 @@ def main():
     infra_log.configure()
     log = logging.getLogger(__name__)
 
-    engines.engine_factory.configure_factory(db_url=CONF.db.connection_url)
+    token_algorithm = iam_opts.get_token_encryption_algorithm(CONF)
 
-    log.info("Start service on %s:%s", CONF[DOMAIN].bind_host, CONF[DOMAIN].bind_port)
-
-    service = bjoern_service.BjoernService(
-        wsgi_app=app.build_wsgi_application(),
-        host=CONF[DOMAIN].bind_host,
-        port=CONF[DOMAIN].bind_port,
-        bjoern_kwargs=dict(reuse_port=True),
+    log.info(
+        "Start service on %s:%s",
+        CONF[DOMAIN].bind_host,
+        CONF[DOMAIN].bind_port,
     )
 
-    service.start()
+    service_hub = hub.ProcessHubService()
+
+    for _ in range(CONF[DOMAIN].workers):
+        service = bjoern_service.BjoernService(
+            wsgi_app=app.build_wsgi_application(
+                token_algorithm=token_algorithm,
+            ),
+            host=CONF[DOMAIN].bind_host,
+            port=CONF[DOMAIN].bind_port,
+            bjoern_kwargs=dict(reuse_port=True),
+        )
+
+        service.add_setup(
+            lambda: engines.engine_factory.configure_postgresql_factory(
+                conf=CONF
+            )
+        )
+
+        service_hub.add_service(service)
+
+    service_hub.start()
 
     log.info("Bye!!!")
 

@@ -14,5 +14,17 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-# project
+import enum
+
+
 GLOBAL_SERVICE_NAME = "genesis_notification"
+
+
+class AlwaysActiveStatus(str, enum.Enum):
+    ACTIVE = "ACTIVE"
+
+
+class EventStatus(str, enum.Enum):
+    NEW = "NEW"
+    IN_PROGRESS = "IN_PROGRESS"
+    ACTIVE = "ACTIVE"

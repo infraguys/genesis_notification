@@ -14,20 +14,15 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from restalchemy.api import controllers as ra_controllers
+import pbr.version
 
-from genesis_notification.api import versions
-
-
-class RootController(ra_controllers.Controller):
-    """Controller for / endpoint"""
-
-    def filter(self, filters):
-        return (versions.API_VERSION_1_0,)
+version_info = pbr.version.VersionInfo("genesis_notification")
 
 
-class ApiEndpointController(ra_controllers.Controller):
-    """Controller for /v1.0/ endpoint"""
+def main() -> None:
+    print(version_info.release_string())
+    return None
 
-    def filter(self, filters):
-        return []
+
+if __name__ == "__main__":
+    main()

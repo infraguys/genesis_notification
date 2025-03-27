@@ -14,4 +14,9 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-API_VERSION_1_0 = "v1.0"
+import unittest
+
+
+class SimpleTest(unittest.TestCase):
+    def test_ok(self):
+        self.assertFalse(False)

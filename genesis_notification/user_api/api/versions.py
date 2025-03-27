@@ -14,16 +14,4 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from restalchemy.api import routes
-
-from genesis_notification.api import controllers
-
-
-class ApiEndpointRoute(routes.Route):
-    """Handler for /v1.0/ endpoint"""
-
-    __controller__ = controllers.ApiEndpointController
-    __allow_methods__ = [routes.FILTER]
-
-    # route to /v1.0/examples/[<uuid>]
-    # examples = routes.route(ExampleRoute)
+API_VERSION_1_0 = "v1"
