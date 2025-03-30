@@ -7,6 +7,6 @@ build:
   elements:
     - images:
       - name: genesis-notification
-        format: raw
+        format: qcow2
         profile: genesis_base
         script: images/install.sh
