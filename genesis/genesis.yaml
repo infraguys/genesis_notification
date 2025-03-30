@@ -1,0 +1,12 @@
+build:
+  deps:
+    - dst: /opt/genesis_notification
+      path:
+        src: ../../genesis_notification
+
+  elements:
+    - images:
+      - name: genesis-notification
+        format: raw
+        profile: genesis_base
+        script: images/install.sh
