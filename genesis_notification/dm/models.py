@@ -25,7 +25,7 @@ from restalchemy.dm import types
 from restalchemy.dm import types_dynamic
 from restalchemy.storage.sql import orm
 
-from genesis_notification.dm import constants as c
+from genesis_notification.common import constants as c
 
 
 class ModelWithAlwaysActiveStatus(models.Model):
