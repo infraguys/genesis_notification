@@ -130,5 +130,5 @@ docs/source/*.png
 .vagrant/
 
 # Configs
-etc/genesis_notification/genesis_notification.conf
+etc/genesis_notification/genesis_notification.d/*.conf
 

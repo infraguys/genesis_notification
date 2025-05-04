@@ -28,3 +28,4 @@ class EventStatus(str, enum.Enum):
     NEW = "NEW"
     IN_PROGRESS = "IN_PROGRESS"
     ACTIVE = "ACTIVE"
+    ERROR = "ERROR"

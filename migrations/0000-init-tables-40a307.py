@@ -40,7 +40,8 @@ class MigrationStep(migrations.AbstarctMigrationStep):
             CREATE TYPE "enum_event_status" AS ENUM (
                 'NEW',
                 'IN_PROGRESS',
-                'ACTIVE'
+                'ACTIVE',
+                'ERROR'
             );
             """,
             """
@@ -52,7 +53,7 @@ class MigrationStep(migrations.AbstarctMigrationStep):
                 "project_id" CHAR(36) NOT NULL,
                 "created_at" TIMESTAMP(6) NOT NULL DEFAULT NOW(),
                 "updated_at" TIMESTAMP(6) NOT NULL DEFAULT NOW(),
-                "protocol" VARCHAR(1024) NOT NULL
+                "protocol" JSONB NOT NULL
             );
             """,
             """
@@ -86,8 +87,8 @@ class MigrationStep(migrations.AbstarctMigrationStep):
                 "project_id" CHAR(36) NOT NULL,
                 "created_at" TIMESTAMP(6) NOT NULL DEFAULT NOW(),
                 "updated_at" TIMESTAMP(6) NOT NULL DEFAULT NOW(),
-                "content" VARCHAR(10240) NOT NULL,
-                "params" VARCHAR(4096) NOT NULL,
+                "content" JSONB NOT NULL,
+                "params" JSONB NOT NULL,
                 "provider" CHAR(36) NOT NULL REFERENCES providers(uuid),
                 "event_type" CHAR(36) NOT NULL REFERENCES event_types(uuid),
                 "is_default" BOOLEAN NOT NULL DEFAULT FALSE
@@ -138,8 +139,12 @@ class MigrationStep(migrations.AbstarctMigrationStep):
                 "created_at" TIMESTAMP(6) NOT NULL DEFAULT NOW(),
                 "updated_at" TIMESTAMP(6) NOT NULL DEFAULT NOW(),
                 "status" enum_event_status NOT NULL DEFAULT 'NEW',
-                "exchange" VARCHAR(1024) NOT NULL,
-                "event_params" VARCHAR(4096) NOT NULL,
+                "status_description" VARCHAR(256) NOT NULL DEFAULT '',
+                "next_retry_at" TIMESTAMP(6) NOT NULL,
+                "last_retry_at" TIMESTAMP(6) NOT NULL,
+                "retry_count" INTEGER NOT NULL DEFAULT 0,
+                "exchange" JSONB NOT NULL,
+                "event_params" JSONB NOT NULL,
                 "event_type" CHAR(36) NOT NULL REFERENCES event_types(uuid)
             );
             """,
@@ -155,10 +160,14 @@ class MigrationStep(migrations.AbstarctMigrationStep):
                 "created_at" TIMESTAMP(6) NOT NULL DEFAULT NOW(),
                 "updated_at" TIMESTAMP(6) NOT NULL DEFAULT NOW(),
                 "status" enum_event_status NOT NULL DEFAULT 'IN_PROGRESS',
-                "message" VARCHAR(10240) NOT NULL,
+                "status_description" VARCHAR(256) NOT NULL DEFAULT '',
+                "next_retry_at" TIMESTAMP(6) NOT NULL,
+                "last_retry_at" TIMESTAMP(6) NOT NULL,
+                "retry_count" INTEGER NOT NULL DEFAULT 0,
+                "content" JSONB NOT NULL,
                 "event_id" CHAR(36) NOT NULL,
                 "provider" CHAR(36) NOT NULL REFERENCES providers(uuid),
-                "user_context" VARCHAR(4096) NOT NULL
+                "user_context" JSONB NOT NULL
             );
             """,
             """
@@ -175,7 +184,9 @@ class MigrationStep(migrations.AbstarctMigrationStep):
             CREATE OR REPLACE VIEW unprocessed_events AS
                 SELECT
                     e.uuid AS uuid,
-                    e.uuid AS event
+                    e.uuid AS event,
+                    e.next_retry_at AS next_retry_at,
+                    e.last_retry_at AS last_retry_at
                 FROM
                     events e
                 LEFT JOIN
@@ -191,7 +202,9 @@ class MigrationStep(migrations.AbstarctMigrationStep):
                     e."uuid",
                     e."uuid" as "event",
                     e."status" as "user_status",
-                    re."status" as "system_status"
+                    e."status_description" as "user_status_description",
+                    re."status" as "system_status",
+                    re."status_description" as "system_status_description"
                 FROM
                     "events" e
                 left JOIN
@@ -200,7 +213,10 @@ class MigrationStep(migrations.AbstarctMigrationStep):
                     )
                 WHERE
                     re."uuid" is NOT NULL AND
-                    e."status" != re."status"
+                    (
+                        e."status" != re."status" OR
+                        e."status_description" != re."status_description"
+                    )
             """,
         ]
 
