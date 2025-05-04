@@ -14,6 +14,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import datetime
 import logging
 
 from gcl_looper.services import basic
@@ -38,14 +39,15 @@ class SMTPAgent(basic.BasicService):
     def _process_events(self):
         for event in models.RenderedEvent.objects.get_all(
             filters={
-                "status": filters.EQ(models.RenderedEvent.STATUS.IN_PROGRESS)
+                "status": filters.NE(models.RenderedEvent.STATUS.ACTIVE.value),
+                "next_retry_at": filters.LT(
+                    datetime.datetime.now(tz=datetime.timezone.utc)
+                ),
             },
             limit=self._butch_size,
         ):
-            LOG.info("Processing event: %r", event)
+            LOG.info("Processing event: %s", event)
             event.send()
-            event.status = models.RenderedEvent.STATUS.ACTIVE
-            event.update()
 
     def _iteration(self):
         ctx = contexts.Context()

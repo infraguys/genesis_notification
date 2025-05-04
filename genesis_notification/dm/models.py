@@ -14,10 +14,14 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import datetime
+import logging
 from email.mime import text
 from email.mime import multipart
 import smtplib
 
+import jinja2
+from restalchemy.dm import filters
 from restalchemy.dm import models
 from restalchemy.dm import properties
 from restalchemy.dm import relationships
@@ -26,6 +30,19 @@ from restalchemy.dm import types_dynamic
 from restalchemy.storage.sql import orm
 
 from genesis_notification.common import constants as c
+
+
+LOG = logging.getLogger(__name__)
+
+
+def next_time(seconds):
+
+    def calulator():
+        now = datetime.datetime.now(datetime.timezone.utc)
+        delta = datetime.timedelta(seconds=seconds)
+        return now + delta
+
+    return calulator
 
 
 class ModelWithAlwaysActiveStatus(models.Model):
@@ -54,30 +71,21 @@ class SimpleSmtpProtocol(types_dynamic.AbstractKindModel):
         required=True,
     )
 
-    def _parse_message(self, message):
-        subject = ""
-        body = message
-        parts = message.split("\n", 2)
-        if len(parts) > 2 and parts[1] == "":
-            subject = parts[0]
-            body = parts[2]
-        return subject, body
-
-    def _build_message(self, message, user_context):
-        subject, body = self._parse_message(message)
+    def _build_message(self, content, user_context):
         msg = multipart.MIMEMultipart("alternative")
         msg["From"] = self.noreply_email_address
-        msg["To"] = user_context["email"]
-        msg["Subject"] = subject
-        msg.attach(text.MIMEText(body, "html", "utf-8"))
+        msg["To"] = user_context["user"]["email"]
+        msg["Subject"] = content.title
+        for body in content.bodies:
+            msg.attach(text.MIMEText(body, "html", "utf-8"))
         return msg
 
-    def send(self, message, user_context):
-        msg = self._build_message(message, user_context)
+    def send(self, content, user_context):
+        msg = self._build_message(content, user_context)
         with smtplib.SMTP(self.host, self.port) as smtp:
             return smtp.sendmail(
                 from_addr=self.noreply_email_address,
-                to_addrs=user_context["email"],
+                to_addrs=user_context["user"]["email"],
                 msg=msg.as_string(),
             )
 
@@ -88,10 +96,9 @@ class Provider(
     ModelWithAlwaysActiveStatus,
     models.ModelWithProject,
     models.ModelWithTimestamp,
-    orm.SQLStorableWithJSONFieldsMixin,
+    orm.SQLStorableMixin,
 ):
     __tablename__ = "providers"
-    __jsonfields__ = ["protocol"]
 
     protocol = properties.property(
         types_dynamic.KindModelSelectorType(
@@ -100,9 +107,9 @@ class Provider(
         required=True,
     )
 
-    def send(self, message, user_context):
+    def send(self, content, user_context):
         return self.protocol.send(
-            message=message,
+            content=content,
             user_context=user_context,
         )
 
@@ -118,19 +125,49 @@ class EventType(
     __tablename__ = "event_types"
 
 
+class AbstractContent(types_dynamic.AbstractKindModel):
+    pass
+
+
+class RenderedEmailContent(AbstractContent):
+    KIND = "rendered_email"
+
+    title = properties.property(
+        types.String(max_length=256),
+        default="",
+    )
+    bodies = properties.property(
+        types.List(),
+        default=list,
+    )
+
+
+class EmailContent(RenderedEmailContent):
+    KIND = "email"
+
+    def render(self, params):
+        return RenderedEmailContent(
+            title=jinja2.Template(self.title).render(**params),
+            bodies=[
+                jinja2.Template(body).render(**params) for body in self.bodies
+            ],
+        )
+
+
 class Template(
     models.ModelWithUUID,
     models.ModelWithRequiredNameDesc,
     ModelWithAlwaysActiveStatus,
     models.ModelWithProject,
     models.ModelWithTimestamp,
-    orm.SQLStorableWithJSONFieldsMixin,
+    orm.SQLStorableMixin,
 ):
     __tablename__ = "templates"
-    __jsonfields__ = ["params"]
 
     content = properties.property(
-        types.String(max_length=10240),
+        types_dynamic.KindModelSelectorType(
+            types_dynamic.KindModelType(EmailContent),
+        ),
         required=True,
     )
     params = properties.property(
@@ -142,7 +179,10 @@ class Template(
         required=True,
         prefetch=True,
     )
-    event_type = relationships.relationship(EventType, required=True)
+    event_type = relationships.relationship(
+        EventType,
+        required=True,
+    )
     is_default = properties.property(
         types.Boolean(),
         default=False,
@@ -156,6 +196,11 @@ class UserExchange(types_dynamic.AbstractKindModel):
         types.UUID(),
         required=True,
     )
+
+    def get_context(self, iam_client):
+        return {
+            "user": iam_client.get_user(self.user_id),
+        }
 
 
 class ProjectExchange(types_dynamic.AbstractKindModel):
@@ -192,15 +237,10 @@ class Binding(
     )
 
 
-class Event(
-    models.ModelWithUUID,
-    models.ModelWithNameDesc,
-    models.ModelWithProject,
-    models.ModelWithTimestamp,
-    orm.SQLStorableWithJSONFieldsMixin,
-):
-    __tablename__ = "events"
-    __jsonfields__ = ["exchange", "event_params"]
+class StatusMixin(models.Model):
+
+    next_retry_delta = 60  # 60 sec
+    last_retry_delta = 1 * 24 * 60 * 60  # 1 day
 
     STATUS = c.EventStatus
 
@@ -208,6 +248,51 @@ class Event(
         types.Enum([s.value for s in STATUS]),
         default=STATUS.NEW.value,
     )
+    status_description = properties.property(
+        types.String(max_length=255),
+        default="",
+    )
+    next_retry_at = properties.property(
+        types.UTCDateTimeZ(),
+        default=next_time(seconds=0),  # now + 0sec
+    )
+    last_retry_at = properties.property(
+        types.UTCDateTimeZ(),
+        default=next_time(seconds=last_retry_delta),  # now + 1day
+    )
+    retry_count = properties.property(
+        types.Integer(min_value=0, max_value=65536),
+        default=0,
+    )
+
+    def reset_next_retry(self):
+        now = datetime.datetime.now(datetime.timezone.utc)
+        self.next_retry_at = now + datetime.timedelta(
+            seconds=self.next_retry_delta
+        )
+
+    def set_error_status(self, error_message):
+        self.status_description = str(error_message)
+        self.retry_count += 1
+        self.status = self.STATUS.ERROR.value
+        self.reset_next_retry()
+        self.save()
+
+    def set_done_status(self):
+        self.status_description = "ok"
+        self.status = self.STATUS.ACTIVE.value
+
+
+class Event(
+    models.ModelWithUUID,
+    models.ModelWithNameDesc,
+    models.ModelWithProject,
+    models.ModelWithTimestamp,
+    StatusMixin,
+    orm.SQLStorableMixin,
+):
+    __tablename__ = "events"
+
     exchange = properties.property(
         types_dynamic.KindModelSelectorType(
             types_dynamic.KindModelType(UserExchange),
@@ -225,22 +310,48 @@ class Event(
         required=True,
     )
 
+    def get_context(self, iam_client):
+        return self.exchange.get_context(iam_client)
+
+    def render(self, iam_client):
+        context = self.get_context(iam_client)
+        templates = Template.objects.get_all(
+            filters={
+                "event_type": filters.EQ(self.event_type),
+                "is_default": filters.EQ(True),
+            }
+        )
+
+        rendered_events = []
+        for template in templates:
+            params = context.copy()
+            params.update(self.event_params)
+            rendered_content = template.content.render(params)
+            rendered_events.append(
+                RenderedEvent(
+                    content=rendered_content,
+                    event_id=self.uuid,
+                    provider=template.provider,
+                    user_context=context,
+                    status=StatusMixin.STATUS.IN_PROGRESS.value,
+                )
+            )
+
+        return rendered_events
+
 
 class RenderedEvent(
     models.ModelWithUUID,
     models.ModelWithTimestamp,
-    orm.SQLStorableWithJSONFieldsMixin,
+    StatusMixin,
+    orm.SQLStorableMixin,
 ):
     __tablename__ = "rendered_events"
-    __jsonfields__ = ["user_context"]
-    STATUS = c.EventStatus
 
-    status = properties.property(
-        types.Enum([s.value for s in STATUS]),
-        default=STATUS.IN_PROGRESS.value,
-    )
-    message = properties.property(
-        types.String(max_length=10240),
+    content = properties.property(
+        types_dynamic.KindModelSelectorType(
+            types_dynamic.KindModelType(RenderedEmailContent),
+        ),
         required=True,
     )
     event_id = properties.property(
@@ -258,10 +369,17 @@ class RenderedEvent(
     )
 
     def send(self):
-        self.provider.send(
-            message=self.message,
-            user_context=self.user_context,
-        )
+        try:
+            self.provider.send(
+                content=self.content,
+                user_context=self.user_context,
+            )
+        except Exception as e:
+            LOG.exception("Failed to send event")
+            self.set_error_status(e)
+            return
+        self.set_done_status()
+        self.update()
 
 
 class UnprocessedEvent(
@@ -274,6 +392,24 @@ class UnprocessedEvent(
         required=True,
         prefetch=True,
     )
+    next_retry_at = properties.property(
+        types.UTCDateTimeZ(),
+        required=True,
+    )
+    last_retry_at = properties.property(
+        types.UTCDateTimeZ(),
+        required=True,
+    )
+
+    def process_event(self, iam_client):
+        try:
+            rendered_events = self.event.render(iam_client)
+        except Exception as e:
+            LOG.exception("Failed to render event")
+            self.event.set_error_status(e)
+            return
+        for rendered_event in rendered_events:
+            rendered_event.insert()
 
 
 class IncorrectStatuses(
@@ -293,7 +429,15 @@ class IncorrectStatuses(
         types.Enum([s.value for s in STATUS]),
         required=True,
     )
+    user_status_description = properties.property(
+        types.String(),
+        default="",
+    )
     system_status = properties.property(
         types.Enum([s.value for s in STATUS]),
         required=True,
+    )
+    system_status_description = properties.property(
+        types.String(),
+        default="",
     )

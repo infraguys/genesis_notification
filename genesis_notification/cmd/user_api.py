@@ -92,8 +92,10 @@ def main():
 
         service_hub.add_service(service)
 
-    service_hub.start()
-
+    if CONF[DOMAIN].workers > 1:
+        service_hub.start()
+    else:
+        service.start()
     log.info("Bye!!!")
 
 
