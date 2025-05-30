@@ -28,6 +28,7 @@ from restalchemy.dm import relationships
 from restalchemy.dm import types
 from restalchemy.dm import types_dynamic
 from restalchemy.storage.sql import orm
+import zulip
 
 from genesis_notification.common import constants as c
 
@@ -90,6 +91,48 @@ class SimpleSmtpProtocol(types_dynamic.AbstractKindModel):
             )
 
 
+class ZulipProtocol(types_dynamic.AbstractKindModel):
+    KIND = "zulip"
+
+    endpoint = properties.property(
+        types.Url(),
+        required=True,
+    )
+    email_address = properties.property(
+        types.Email(),
+        required=True,
+    )
+    api_key = properties.property(
+        types.String(),
+        required=True,
+    )
+
+    def send(self, content, user_context):
+        client = zulip.Client(
+            site=self.endpoint,
+            email=self.email_address,
+            api_key=self.api_key,
+        )
+        if content.KIND == RenderedStreamMessageContent.KIND:
+            request = {
+                "type": "stream",
+                "to": content.to,
+                "topic": content.topic,
+                "content": content.content,
+            }
+        elif content.KIND == RenderedDirectMessageContent.KIND:
+            request = {
+                "type": "direct",
+                "to": content.to,
+                "content": content.content,
+            }
+        else:
+            raise NotImplementedError(f"Unsupported content type {content}")
+        result = client.send_message(request)
+        if result["result"] != "success":
+            raise RuntimeError(f"Failed to send message: {result['msg']}")
+
+
 class Provider(
     models.ModelWithUUID,
     models.ModelWithRequiredNameDesc,
@@ -103,6 +146,7 @@ class Provider(
     protocol = properties.property(
         types_dynamic.KindModelSelectorType(
             types_dynamic.KindModelType(SimpleSmtpProtocol),
+            types_dynamic.KindModelType(ZulipProtocol),
         ),
         required=True,
     )
@@ -126,7 +170,9 @@ class EventType(
 
 
 class AbstractContent(types_dynamic.AbstractKindModel):
-    pass
+
+    def get_id(self):
+        return "%s" % self.__class__.__name__.lower()
 
 
 class RenderedEmailContent(AbstractContent):
@@ -154,6 +200,92 @@ class EmailContent(RenderedEmailContent):
         )
 
 
+class RenderedStreamMessageContent(AbstractContent):
+    KIND = "rendered_zulip_stream_message"
+
+    to = properties.property(
+        types.String(min_length=1, max_length=256),
+        required=True,
+    )
+    topic = properties.property(
+        types.String(min_length=1, max_length=256),
+        required=True,
+    )
+    content = properties.property(
+        types.String(min_length=1, max_length=10000),
+        required=True,
+    )
+
+
+class ZulipStreamMessageContent(RenderedStreamMessageContent):
+    KIND = "zulip_stream_message"
+
+    to = properties.property(
+        types.String(min_length=1, max_length=256),
+        default="{{ channel }}",
+    )
+    topic = properties.property(
+        types.String(min_length=1, max_length=256),
+        default="{{ topic }}",
+    )
+    content = properties.property(
+        types.String(min_length=1, max_length=10000),
+        default="{{ message }}",
+    )
+
+    def render(self, params):
+        return RenderedStreamMessageContent(
+            to=jinja2.Template(self.to).render(**params),
+            topic=jinja2.Template(self.topic).render(**params),
+            content=jinja2.Template(self.content).render(**params),
+        )
+
+
+class RenderedDirectMessageContent(AbstractContent):
+    KIND = "rendered_zulip_direct_message"
+
+    to = properties.property(
+        types.TypedList(
+            nested_type=types.String(min_length=1, max_length=256)
+        ),
+        required=True,
+    )
+    content = properties.property(
+        types.String(min_length=1, max_length=10000),
+        required=True,
+    )
+
+
+class ZulipDirectMessageContent(RenderedDirectMessageContent):
+    KIND = "zulip_direct_message"
+
+    to = properties.property(
+        types.String(min_length=1, max_length=256),
+        default="{{ users }}",
+    )
+    content = properties.property(
+        types.String(min_length=1, max_length=10000),
+        default="{{ message }}",
+    )
+
+    def render(self, params):
+        return RenderedDirectMessageContent(
+            to=[
+                user.strip()
+                for user in jinja2.Template(self.to)
+                .render(**params)
+                .split(",")
+            ],
+            content=jinja2.Template(self.content).render(**params),
+        )
+
+
+ZULIP_MESSAGE_TYPE_MAP = {
+    RenderedStreamMessageContent.KIND: "stream",
+    RenderedDirectMessageContent.KIND: "direct",
+}
+
+
 class Template(
     models.ModelWithUUID,
     models.ModelWithRequiredNameDesc,
@@ -167,6 +299,8 @@ class Template(
     content = properties.property(
         types_dynamic.KindModelSelectorType(
             types_dynamic.KindModelType(EmailContent),
+            types_dynamic.KindModelType(ZulipStreamMessageContent),
+            types_dynamic.KindModelType(ZulipDirectMessageContent),
         ),
         required=True,
     )
@@ -201,6 +335,13 @@ class UserExchange(types_dynamic.AbstractKindModel):
         return {
             "user": iam_client.get_user(self.user_id),
         }
+
+
+class DummyExchange(types_dynamic.AbstractKindModel):
+    KIND = "Dummy"
+
+    def get_context(self, iam_client):
+        return {}
 
 
 class ProjectExchange(types_dynamic.AbstractKindModel):
@@ -298,8 +439,9 @@ class Event(
             types_dynamic.KindModelType(UserExchange),
             types_dynamic.KindModelType(ProjectExchange),
             types_dynamic.KindModelType(SystemExchange),
+            types_dynamic.KindModelType(DummyExchange),
         ),
-        required=True,
+        default=DummyExchange,
     )
     event_params = properties.property(
         types.Dict(),
@@ -351,6 +493,8 @@ class RenderedEvent(
     content = properties.property(
         types_dynamic.KindModelSelectorType(
             types_dynamic.KindModelType(RenderedEmailContent),
+            types_dynamic.KindModelType(RenderedStreamMessageContent),
+            types_dynamic.KindModelType(RenderedDirectMessageContent),
         ),
         required=True,
     )
