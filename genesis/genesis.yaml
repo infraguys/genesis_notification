@@ -10,3 +10,7 @@ build:
         format: qcow2
         profile: genesis_base
         script: images/install.sh
+
+        # Override image build parameters, for instance a disk size
+        override:
+          disk_size: "6G"

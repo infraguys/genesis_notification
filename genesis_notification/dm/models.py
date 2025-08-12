@@ -81,14 +81,38 @@ class SimpleSmtpProtocol(types_dynamic.AbstractKindModel):
             msg.attach(text.MIMEText(body, "html", "utf-8"))
         return msg
 
+    def _authenticate(self, smtp):
+        return smtp
+
     def send(self, content, user_context):
         msg = self._build_message(content, user_context)
         with smtplib.SMTP(self.host, self.port) as smtp:
+            smtp = self._authenticate(smtp)
             return smtp.sendmail(
                 from_addr=self.noreply_email_address,
                 to_addrs=user_context["user"]["email"],
                 msg=msg.as_string(),
             )
+
+
+class StartTlsSmtpProtocol(SimpleSmtpProtocol):
+    KIND = "StartTlsSMTP"
+
+    user = properties.property(
+        types.Email(),
+        required=True,
+    )
+    password = properties.property(
+        types.String(max_length=128, min_length=1),
+        required=True,
+    )
+
+    def _authenticate(self, smtp):
+        smtp.ehlo()
+        smtp.starttls()
+        smtp.ehlo()
+        smtp.login(self.user, self.password)
+        return smtp
 
 
 class ZulipProtocol(types_dynamic.AbstractKindModel):
@@ -146,6 +170,7 @@ class Provider(
     protocol = properties.property(
         types_dynamic.KindModelSelectorType(
             types_dynamic.KindModelType(SimpleSmtpProtocol),
+            types_dynamic.KindModelType(StartTlsSmtpProtocol),
             types_dynamic.KindModelType(ZulipProtocol),
         ),
         required=True,
