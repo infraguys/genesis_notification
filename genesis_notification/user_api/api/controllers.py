@@ -13,10 +13,12 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
+import datetime
 
 from restalchemy.api import controllers as ra_controllers
 from restalchemy.api import resources
 
+from genesis_notification.common import constants as c
 from genesis_notification.dm import models
 from genesis_notification.user_api.api import versions
 
@@ -56,3 +58,40 @@ class EventController(ra_controllers.BaseResourceController):
     __resource__ = resources.ResourceByRAModel(
         models.Event, convert_underscore=False
     )
+
+
+class InstallationController(ra_controllers.BaseResourceController):
+    __resource__ = resources.ResourceByRAModel(
+        models.Installation,
+        convert_underscore=False,
+    )
+
+    def _update_existing(self, existing, resource):
+        existing.push_token = resource["push_token"]
+        existing.platform = resource["platform"]
+
+        existing.app_version = resource.get("app_version", "")
+        existing.os_version = resource.get("os_version", "")
+        existing.device_model = resource.get("device_model", "")
+
+        existing.status = c.AlwaysActiveStatus.ACTIVE.value
+        existing.last_seen_at = datetime.datetime.now(datetime.timezone.utc)
+
+        existing.save()
+
+        return existing
+
+    def create(self, **kwargs):
+        installation_id = kwargs.get("installation_id")
+
+        existing = models.Installation.objects.get_one(
+            filters={
+                "installation_id": installation_id,
+                "project_id": kwargs.get("project_id")
+            }
+        )
+
+        if existing:
+            return self._update_existing(existing, kwargs)
+
+        return super().create(**kwargs)

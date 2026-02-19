@@ -16,11 +16,13 @@
 
 import datetime
 import logging
+from dataclasses import dataclass
 from email.mime import text
 from email.mime import multipart
 import smtplib
 
 import jinja2
+import requests
 from restalchemy.dm import filters
 from restalchemy.dm import models
 from restalchemy.dm import properties
@@ -31,7 +33,7 @@ from restalchemy.storage.sql import orm
 import zulip
 
 from genesis_notification.common import constants as c
-
+from genesis_notification.common.constants import PushDeliveryStatus
 
 LOG = logging.getLogger(__name__)
 
@@ -54,6 +56,211 @@ class ModelWithAlwaysActiveStatus(models.Model):
         types.Enum([s.value for s in c.AlwaysActiveStatus]),
         default=STATUS.ACTIVE.value,
     )
+
+
+class Installation(
+    models.ModelWithUUID,
+    models.ModelWithProject,
+    ModelWithAlwaysActiveStatus,
+    models.ModelWithTimestamp,
+    orm.SQLStorableMixin,
+):
+    __tablename__ = "installations"
+
+    installation_id = properties.property(
+        types.String(min_length=8, max_length=128),
+        required=True,
+    )
+
+    user_id = properties.property(
+        types.UUID(),
+        required=True,
+    )
+
+    push_token = properties.property(
+        types.String(min_length=16, max_length=512),
+        required=True,
+    )
+
+    platform = properties.property(
+        types.Enum(["ios", "android", "web"]),
+        required=True,
+    )
+
+    last_seen_at = properties.property(
+        types.UTCDateTimeZ(),
+        default=next_time(0),
+    )
+
+
+FCM_PERMANENT_ERRORS = {
+    "UNREGISTERED",
+    "INVALID_ARGUMENT",
+    "NOT_FOUND",
+}
+
+FCM_RETRYABLE_ERRORS = {
+    "UNAVAILABLE",
+    "INTERNAL",
+    "QUOTA_EXCEEDED",
+}
+
+
+@dataclass
+class PushDeliveryResult:
+
+    installation_id: str
+    token: str
+
+    status: PushDeliveryStatus
+
+    error_code: str | None = None
+    error_message: str | None = None
+
+    provider_response: dict | None = None
+
+
+@dataclass
+class PushBatchResult:
+
+    results: list[PushDeliveryResult]
+
+    def success_count(self):
+        return sum(1 for r in self.results if r.status == PushDeliveryStatus.SUCCESS)
+
+    def permanent_failures(self):
+        return [
+            r for r in self.results
+            if r.status == PushDeliveryStatus.PERMANENT_FAILURE
+        ]
+
+    def retryable_failures(self):
+        return [
+            r for r in self.results
+            if r.status == PushDeliveryStatus.RETRYABLE_FAILURE
+        ]
+
+    def total_failure(self):
+        return self.success_count() == 0
+
+
+class FCMProtocol(types_dynamic.AbstractKindModel):
+    KIND = "fcm"
+
+    project_id = properties.property(
+        types.String(),
+        required=True,
+    )
+
+    service_account_json = properties.property(
+        types.String(),
+        required=True,
+    )
+
+    def _send_to_token(self, installation, content):
+
+        try:
+            resp = requests.post(...)
+
+            if resp.status_code == 200:
+                return PushDeliveryResult(
+                    installation_id=installation.installation_id,
+                    token=installation.push_token,
+                    status=PushDeliveryStatus.SUCCESS,
+                    provider_response=resp.json(),
+                )
+
+            error = self._extract_error(resp)
+
+            if error in FCM_PERMANENT_ERRORS:
+                return PushDeliveryResult(
+                    installation_id=installation.installation_id,
+                    token=installation.push_token,
+                    status=PushDeliveryStatus.PERMANENT_FAILURE,
+                    error_code=error,
+                    error_message=resp.text,
+                )
+
+            return PushDeliveryResult(
+                installation_id=installation.installation_id,
+                token=installation.push_token,
+                status=PushDeliveryStatus.RETRYABLE_FAILURE,
+                error_code=error,
+                error_message=resp.text,
+            )
+
+        except Exception as e:
+            return PushDeliveryResult(
+                installation_id=installation.installation_id,
+                token=installation.push_token,
+                status=PushDeliveryStatus.RETRYABLE_FAILURE,
+                error_code="CLIENT_EXCEPTION",
+                error_message=str(e),
+            )
+
+    def _send_batch(self, installations, content):
+
+        results = []
+
+        for inst in installations:
+            result = self._send_to_token(inst, content)
+            results.append(result)
+
+        return PushBatchResult(results)
+
+    def _is_total_failure(self, results):
+
+        if not results:
+            return False
+
+        success_count = sum(1 for r in results if r["success"])
+        return success_count == 0
+
+    def _build_payload(self, token, content):
+
+        return {
+            "message": {
+                "token": token,
+                "notification": {
+                    "title": content.title,
+                    "body": content.body,
+                },
+                "data": content.data or {},
+            }
+        }
+
+    def _process_batch_result(self, batch_result):
+
+        for r in batch_result.permanent_failures():
+
+            inst = Installation.objects.get_one(
+                filters={"installation_id": r.installation_id}
+            )
+
+            if inst:
+                inst.status = c.AlwaysActiveStatus.INACTIVE.value
+                inst.save()
+
+    def send(self, content, user_context):
+
+        user_id = user_context["user"]["id"]
+
+        installations = Installation.objects.get_all(
+            filters={
+                "user_id": filters.EQ(user_id),
+                "status": filters.EQ(c.AlwaysActiveStatus.ACTIVE.value),
+            }
+        )
+
+        if not installations:
+            return
+
+        batch_result = self._send_batch(installations, content)
+
+        self._process_batch_result(batch_result)
+
+        if batch_result.total_failure():
+            raise RuntimeError("Push delivery totally failed")
 
 
 class SimpleSmtpProtocol(types_dynamic.AbstractKindModel):
@@ -172,6 +379,7 @@ class Provider(
             types_dynamic.KindModelType(SimpleSmtpProtocol),
             types_dynamic.KindModelType(StartTlsSmtpProtocol),
             types_dynamic.KindModelType(ZulipProtocol),
+            types_dynamic.KindModelType(FCMProtocol),
         ),
         required=True,
     )
@@ -311,6 +519,28 @@ ZULIP_MESSAGE_TYPE_MAP = {
 }
 
 
+class RenderedPushContent(AbstractContent):
+    KIND = "rendered_push"
+
+    title = properties.property(types.String(), default="")
+    body = properties.property(types.String(), default="")
+    data = properties.property(types.Dict(), default=dict)
+
+
+class PushContent(RenderedPushContent):
+    KIND = "push"
+
+    def render(self, params):
+        return RenderedPushContent(
+            title=jinja2.Template(self.title).render(**params),
+            body=jinja2.Template(self.body).render(**params),
+            data={
+                k: jinja2.Template(str(v)).render(**params)
+                for k, v in self.data.items()
+            },
+        )
+
+
 class Template(
     models.ModelWithUUID,
     models.ModelWithRequiredNameDesc,
@@ -326,6 +556,7 @@ class Template(
             types_dynamic.KindModelType(EmailContent),
             types_dynamic.KindModelType(ZulipStreamMessageContent),
             types_dynamic.KindModelType(ZulipDirectMessageContent),
+            types_dynamic.KindModelType(PushContent),
         ),
         required=True,
     )
