@@ -584,7 +584,7 @@ class PushContent(RenderedPushContent):
             title=jinja2.Template(self.title).render(**params),
             body=jinja2.Template(self.body).render(**params),
             data={
-                k: jinja2.Template(str(v)).render(**params)
+                k: jinja2.Template(str(v)).render(**params) if isinstance(v, str) else v
                 for k, v in self.data.items()
             },
         )
