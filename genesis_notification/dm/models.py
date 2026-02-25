@@ -15,6 +15,7 @@
 #    under the License.
 
 import datetime
+import json
 import logging
 from dataclasses import dataclass
 from email.mime import text
@@ -22,7 +23,6 @@ from email.mime import multipart
 import smtplib
 
 import jinja2
-import requests
 from restalchemy.dm import filters
 from restalchemy.dm import models
 from restalchemy.dm import properties
@@ -31,6 +31,16 @@ from restalchemy.dm import types
 from restalchemy.dm import types_dynamic
 from restalchemy.storage.sql import orm
 import zulip
+
+import firebase_admin
+from firebase_admin import credentials, messaging
+from firebase_admin.messaging import (
+    UnregisteredError,
+    SenderIdMismatchError,
+    InvalidArgumentError,
+    InternalError,
+    ThirdPartyAuthError,
+)
 
 from genesis_notification.common import constants as c
 from genesis_notification.common.constants import PushDeliveryStatus
@@ -60,7 +70,6 @@ class ModelWithAlwaysActiveStatus(models.Model):
 
 class Installation(
     models.ModelWithUUID,
-    models.ModelWithProject,
     ModelWithAlwaysActiveStatus,
     models.ModelWithTimestamp,
     orm.SQLStorableMixin,
@@ -157,64 +166,104 @@ class FCMProtocol(types_dynamic.AbstractKindModel):
         required=True,
     )
 
-    def _send_to_token(self, installation, content):
+    _app = None
+    FCM_MAX_BATCH = 500
+
+    def _get_firebase_app(self):
+
+        if self._app:
+            return self._app
+
+        service_account_info = json.loads(self.service_account_json)
+
+        cred = credentials.Certificate(service_account_info)
+
+        app_name = f"fcm-{self.project_id}"
 
         try:
-            resp = requests.post(...)
-
-            if resp.status_code == 200:
-                return PushDeliveryResult(
-                    installation_id=installation.installation_id,
-                    token=installation.push_token,
-                    status=PushDeliveryStatus.SUCCESS,
-                    provider_response=resp.json(),
-                )
-
-            error = self._extract_error(resp)
-
-            if error in FCM_PERMANENT_ERRORS:
-                return PushDeliveryResult(
-                    installation_id=installation.installation_id,
-                    token=installation.push_token,
-                    status=PushDeliveryStatus.PERMANENT_FAILURE,
-                    error_code=error,
-                    error_message=resp.text,
-                )
-
-            return PushDeliveryResult(
-                installation_id=installation.installation_id,
-                token=installation.push_token,
-                status=PushDeliveryStatus.RETRYABLE_FAILURE,
-                error_code=error,
-                error_message=resp.text,
+            self._app = firebase_admin.get_app(app_name)
+        except ValueError:
+            self._app = firebase_admin.initialize_app(
+                cred,
+                name=app_name,
             )
 
-        except Exception as e:
-            return PushDeliveryResult(
-                installation_id=installation.installation_id,
-                token=installation.push_token,
-                status=PushDeliveryStatus.RETRYABLE_FAILURE,
-                error_code="CLIENT_EXCEPTION",
-                error_message=str(e),
-            )
+        return self._app
+
+    def _map_exception(self, exc):
+
+        if isinstance(exc, (
+            UnregisteredError,
+            SenderIdMismatchError,
+            InvalidArgumentError,
+        )):
+            return PushDeliveryStatus.PERMANENT_FAILURE
+
+        if isinstance(exc, (
+            InternalError,
+            ThirdPartyAuthError,
+        )):
+            return PushDeliveryStatus.RETRYABLE_FAILURE
+
+        return PushDeliveryStatus.RETRYABLE_FAILURE
 
     def _send_batch(self, installations, content):
 
+        app = self._get_firebase_app()
+
+        tokens = [i.push_token for i in installations]
+        installation_map = {
+            i.push_token: i.installation_id
+            for i in installations
+        }
+
         results = []
 
-        for inst in installations:
-            result = self._send_to_token(inst, content)
-            results.append(result)
+        for i in range(0, len(tokens), self.FCM_MAX_BATCH):
+
+            chunk = tokens[i:i + self.FCM_MAX_BATCH]
+
+            message = messaging.MulticastMessage(
+                tokens=chunk,
+                notification=messaging.Notification(
+                    title=content.title,
+                    body=content.body,
+                ),
+                data=content.data or {},
+            )
+
+            response = messaging.send_multicast(message, app=app)
+
+            for idx, resp in enumerate(response.responses):
+
+                token = chunk[idx]
+                installation_id = installation_map[token]
+
+                if resp.success:
+
+                    results.append(
+                        PushDeliveryResult(
+                            installation_id=installation_id,
+                            token=token,
+                            status=PushDeliveryStatus.SUCCESS,
+                            provider_response={"message_id": resp.message_id},
+                        )
+                    )
+
+                else:
+                    status = self._map_exception(resp.exception)
+
+                    results.append(
+                        PushDeliveryResult(
+                            installation_id=installation_id,
+                            token=token,
+                            status=status,
+                            error_code=type(resp.exception).__name__,
+                            error_message=str(resp.exception),
+                        )
+                    )
 
         return PushBatchResult(results)
-
-    def _is_total_failure(self, results):
-
-        if not results:
-            return False
-
-        success_count = sum(1 for r in results if r["success"])
-        return success_count == 0
 
     def _build_payload(self, token, content):
 
@@ -522,8 +571,8 @@ ZULIP_MESSAGE_TYPE_MAP = {
 class RenderedPushContent(AbstractContent):
     KIND = "rendered_push"
 
-    title = properties.property(types.String(), default="")
-    body = properties.property(types.String(), default="")
+    title = properties.property(types.String(), default="{{ title }}")
+    body = properties.property(types.String(), default="{{ body }}")
     data = properties.property(types.Dict(), default=dict)
 
 
@@ -751,6 +800,7 @@ class RenderedEvent(
             types_dynamic.KindModelType(RenderedEmailContent),
             types_dynamic.KindModelType(RenderedStreamMessageContent),
             types_dynamic.KindModelType(RenderedDirectMessageContent),
+            types_dynamic.KindModelType(RenderedPushContent),
         ),
         required=True,
     )

@@ -32,6 +32,6 @@ class EventStatus(str, enum.Enum):
 
 
 class PushDeliveryStatus(str, enum.Enum):
-    SUCCESS = "success"
-    PERMANENT_FAILURE = "permanent_failure"
-    RETRYABLE_FAILURE = "retryable_failure"
+    SUCCESS = "SUCCESS"
+    PERMANENT_FAILURE = "PERMANENT_FAILURE"
+    RETRYABLE_FAILURE = "RETRYABLE_FAILURE"
