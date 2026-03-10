@@ -36,7 +36,6 @@ class MigrationStep(migrations.AbstractMigrationStep):
             CREATE TABLE "installations" (
                 "uuid" CHAR(36) PRIMARY KEY,
                 "status" enum_status_active NOT NULL DEFAULT 'ACTIVE',
-                "project_id" CHAR(36) NOT NULL,
                 "created_at" TIMESTAMP(6) NOT NULL DEFAULT NOW(),
                 "updated_at" TIMESTAMP(6) NOT NULL DEFAULT NOW(),
 
@@ -44,12 +43,10 @@ class MigrationStep(migrations.AbstractMigrationStep):
                 "user_id" CHAR(36) NOT NULL,
                 "platform" VARCHAR(32) NOT NULL,
                 "push_token" TEXT NOT NULL,
-                "device_info" JSONB NOT NULL DEFAULT '{}'
+                "app_version" CHAR(16) NOT NULL,
+                "os_version" CHAR(16) NOT NULL,
+                "device_model" CHAR(16) NOT NULL
             );
-            """,
-            """
-            CREATE INDEX "installations_project_idx"
-            ON "installations" ("project_id");
             """,
             """
             CREATE INDEX "installations_user_idx"

@@ -35,6 +35,10 @@ class EventRoute(routes.Route):
     __controller__ = controllers.EventController
 
 
+class InstallationRoute(routes.Route):
+    __controller__ = controllers.InstallationController
+
+
 class ApiEndpointRoute(routes.Route):
     """Handler for /v1.0/ endpoint"""
 
@@ -45,3 +49,4 @@ class ApiEndpointRoute(routes.Route):
     templates = routes.route(TemplateRoute)
     event_types = routes.route(EventTypeRoute)
     events = routes.route(EventRoute)
+    installations = routes.route(InstallationRoute)

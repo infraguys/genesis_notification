@@ -37,8 +37,6 @@ from firebase_admin import credentials, messaging
 from firebase_admin.messaging import (
     UnregisteredError,
     SenderIdMismatchError,
-    InvalidArgumentError,
-    InternalError,
     ThirdPartyAuthError,
 )
 
@@ -96,9 +94,19 @@ class Installation(
         required=True,
     )
 
-    last_seen_at = properties.property(
-        types.UTCDateTimeZ(),
-        default=next_time(0),
+    app_version = properties.property(
+        types.String(max_length=16),
+        required=True,
+    )
+
+    os_version = properties.property(
+        types.String(max_length=16),
+        required=True,
+    )
+
+    device_model = properties.property(
+        types.String(max_length=16),
+        required=True,
     )
 
 
@@ -166,13 +174,7 @@ class FCMProtocol(types_dynamic.AbstractKindModel):
         required=True,
     )
 
-    _app = None
-    FCM_MAX_BATCH = 500
-
     def _get_firebase_app(self):
-
-        if self._app:
-            return self._app
 
         service_account_info = json.loads(self.service_account_json)
 
@@ -181,26 +183,24 @@ class FCMProtocol(types_dynamic.AbstractKindModel):
         app_name = f"fcm-{self.project_id}"
 
         try:
-            self._app = firebase_admin.get_app(app_name)
+            app = firebase_admin.get_app(app_name)
         except ValueError:
-            self._app = firebase_admin.initialize_app(
+            app = firebase_admin.initialize_app(
                 cred,
                 name=app_name,
             )
 
-        return self._app
+        return app
 
     def _map_exception(self, exc):
 
         if isinstance(exc, (
             UnregisteredError,
             SenderIdMismatchError,
-            InvalidArgumentError,
         )):
             return PushDeliveryStatus.PERMANENT_FAILURE
 
         if isinstance(exc, (
-            InternalError,
             ThirdPartyAuthError,
         )):
             return PushDeliveryStatus.RETRYABLE_FAILURE
@@ -219,9 +219,9 @@ class FCMProtocol(types_dynamic.AbstractKindModel):
 
         results = []
 
-        for i in range(0, len(tokens), self.FCM_MAX_BATCH):
+        for i in range(0, len(tokens), 500):
 
-            chunk = tokens[i:i + self.FCM_MAX_BATCH]
+            chunk = tokens[i:i + 500]
 
             message = messaging.MulticastMessage(
                 tokens=chunk,
@@ -232,7 +232,8 @@ class FCMProtocol(types_dynamic.AbstractKindModel):
                 data=content.data or {},
             )
 
-            response = messaging.send_multicast(message, app=app)
+            # In firebase-admin 6.x+, send_multicast was replaced with send_each_for_multicast
+            response = messaging.send_each_for_multicast(message, app=app)
 
             for idx, resp in enumerate(response.responses):
 
@@ -292,7 +293,7 @@ class FCMProtocol(types_dynamic.AbstractKindModel):
 
     def send(self, content, user_context):
 
-        user_id = user_context["user"]["id"]
+        user_id = user_context["user"]["uuid"]
 
         installations = Installation.objects.get_all(
             filters={
@@ -584,7 +585,7 @@ class PushContent(RenderedPushContent):
             title=jinja2.Template(self.title).render(**params),
             body=jinja2.Template(self.body).render(**params),
             data={
-                k: jinja2.Template(str(v)).render(**params) if isinstance(v, str) else v
+                k: jinja2.Template(v).render(**params) if isinstance(v, str) else v
                 for k, v in self.data.items()
             },
         )

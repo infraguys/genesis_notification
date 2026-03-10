@@ -75,7 +75,7 @@ class InstallationController(ra_controllers.BaseResourceController):
         existing.device_model = resource.get("device_model", "")
 
         existing.status = c.AlwaysActiveStatus.ACTIVE.value
-        existing.last_seen_at = datetime.datetime.now(datetime.timezone.utc)
+        existing.user_id = resource.get("user_id", "")
 
         existing.save()
 
@@ -87,7 +87,6 @@ class InstallationController(ra_controllers.BaseResourceController):
         existing = models.Installation.objects.get_one(
             filters={
                 "installation_id": installation_id,
-                "project_id": kwargs.get("project_id")
             }
         )
 
