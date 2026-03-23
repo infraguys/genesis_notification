@@ -28,7 +28,6 @@ LOG = logging.getLogger(__name__)
 
 
 class SMTPAgent(basic.BasicService):
-
     def __init__(self, butch_size=100, iter_min_period=5, **kwargs):
         self._butch_size = butch_size
         super().__init__(iter_min_period=iter_min_period, **kwargs)

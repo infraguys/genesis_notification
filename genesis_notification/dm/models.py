@@ -47,7 +47,6 @@ def next_time(seconds):
 
 
 class ModelWithAlwaysActiveStatus(models.Model):
-
     STATUS = c.AlwaysActiveStatus
 
     status = properties.property(
@@ -195,7 +194,6 @@ class EventType(
 
 
 class AbstractContent(types_dynamic.AbstractKindModel):
-
     def get_id(self):
         return "%s" % self.__class__.__name__.lower()
 
@@ -219,9 +217,7 @@ class EmailContent(RenderedEmailContent):
     def render(self, params):
         return RenderedEmailContent(
             title=jinja2.Template(self.title).render(**params),
-            bodies=[
-                jinja2.Template(body).render(**params) for body in self.bodies
-            ],
+            bodies=[jinja2.Template(body).render(**params) for body in self.bodies],
         )
 
 
@@ -270,9 +266,7 @@ class RenderedDirectMessageContent(AbstractContent):
     KIND = "rendered_zulip_direct_message"
 
     to = properties.property(
-        types.TypedList(
-            nested_type=types.String(min_length=1, max_length=256)
-        ),
+        types.TypedList(nested_type=types.String(min_length=1, max_length=256)),
         required=True,
     )
     content = properties.property(
@@ -297,9 +291,7 @@ class ZulipDirectMessageContent(RenderedDirectMessageContent):
         return RenderedDirectMessageContent(
             to=[
                 user.strip()
-                for user in jinja2.Template(self.to)
-                .render(**params)
-                .split(",")
+                for user in jinja2.Template(self.to).render(**params).split(",")
             ],
             content=jinja2.Template(self.content).render(**params),
         )
@@ -404,7 +396,6 @@ class Binding(
 
 
 class StatusMixin(models.Model):
-
     next_retry_delta = 60  # 60 sec
     last_retry_delta = 1 * 24 * 60 * 60  # 1 day
 
@@ -433,9 +424,7 @@ class StatusMixin(models.Model):
 
     def reset_next_retry(self):
         now = datetime.datetime.now(datetime.timezone.utc)
-        self.next_retry_at = now + datetime.timedelta(
-            seconds=self.next_retry_delta
-        )
+        self.next_retry_at = now + datetime.timedelta(seconds=self.next_retry_delta)
 
     def set_error_status(self, error_message):
         self.status_description = str(error_message)

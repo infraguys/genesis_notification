@@ -53,6 +53,4 @@ class EventTypeController(ra_controllers.BaseResourceController):
 
 
 class EventController(ra_controllers.BaseResourceController):
-    __resource__ = resources.ResourceByRAModel(
-        models.Event, convert_underscore=False
-    )
+    __resource__ = resources.ResourceByRAModel(models.Event, convert_underscore=False)

@@ -28,7 +28,6 @@ LOG = logging.getLogger(__name__)
 
 
 class EventBuilderAgent(basic.BasicService):
-
     def __init__(self, iam_client, butch_size=100, **kwargs):
         self._iam_client = iam_client
         self._butch_size = butch_size
