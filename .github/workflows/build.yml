@@ -2,7 +2,10 @@ name: build
 
 on:
   push:
-  pull_request:
+
+env:
+  PROJECT_NAME: genesis-notification
+  REPO_ENDPOINT_PUT: http://10.20.0.1:8082
 
 jobs:
   Build:
@@ -10,19 +13,32 @@ jobs:
     strategy:
       fail-fast: true
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v5
       - name: Build Genesis Core
         run: |
           set -eux
 
           genesis build $(pwd)
 
-          # Temporary upload step is done in the build script
           VERSION="$(genesis get-version .)"
-          ELEMENT_PATH="/var/lib/repository/genesis_notification"
+          
+          # Prepare `raw` and `raw.gz` images
+          cd output
+          qemu-img convert -f qcow2 genesis-notification.qcow2 -O raw genesis-notification.raw
+          gzip -5 -k < genesis-notification.raw > genesis-notification.raw.gz
+          
+          # Upload the VM images
+          curl -X PUT --upload-file genesis-notification.qcow2 \
+            ${REPO_ENDPOINT_PUT}/${PROJECT_NAME}/${VERSION}/genesis-notification.qcow2
+          curl -X PUT --upload-file genesis-notification.raw.gz \
+            ${REPO_ENDPOINT_PUT}/${PROJECT_NAME}/${VERSION}/genesis-notification.raw.gz
+          curl -X PUT --upload-file genesis-notification.raw \
+            ${REPO_ENDPOINT_PUT}/${PROJECT_NAME}/${VERSION}/genesis-notification.raw
 
-          rm -fr "${ELEMENT_PATH}/${VERSION}"
-          mkdir -p "${ELEMENT_PATH}/${VERSION}"
-          mv output/genesis-notification.qcow2 "${ELEMENT_PATH}/${VERSION}/"
-          cd ${ELEMENT_PATH}/${VERSION}/ && \
-            sha256sum genesis-notification.qcow2 >> ${ELEMENT_PATH}/${VERSION}/SHA256SUMS
+          sha256sum genesis-notification.qcow2 >> SHA256SUMS
+          sha256sum genesis-notification.raw.gz >> SHA256SUMS
+          sha256sum genesis-notification.raw >> SHA256SUMS
+
+          curl -X PUT --upload-file SHA256SUMS \
+            ${REPO_ENDPOINT_PUT}/${PROJECT_NAME}/${VERSION}/SHA256SUMS
+          cd -

@@ -19,7 +19,6 @@ from bazooka import client
 
 
 class IAMClient(common.RESTClientMixIn):
-
     USER_PATH = "iam/users"
 
     def __init__(self, endpoint, token, timeout=5):

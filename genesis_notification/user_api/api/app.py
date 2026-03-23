@@ -54,10 +54,8 @@ def get_openapi_engine():
     openapi_engine = openapi_engines.OpenApiEngine(
         info=openapi_structures.OpenApiInfo(
             title=f"Genesis Notification {versions.API_VERSION_1_0} User API",
-            version=app_version.version_info.release_string(),
-            description=(
-                f"OpenAPI - Genesis Notification {versions.API_VERSION_1_0}"
-            ),
+            version=app_version.version_info,
+            description=(f"OpenAPI - Genesis Notification {versions.API_VERSION_1_0}"),
         ),
         paths=openapi_structures.OpenApiPaths(),
         components=openapi_structures.OpenApiComponents(),

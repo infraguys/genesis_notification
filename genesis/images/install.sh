@@ -24,7 +24,6 @@ set -o pipefail
 GC_PATH="/opt/genesis_notification"
 GC_CFG_DIR=/etc/genesis_notification
 VENV_PATH="$GC_PATH/.venv"
-BOOTSTRAP_PATH="/var/lib/genesis/bootstrap/scripts"
 
 GC_PG_USER="genesis_notification"
 GC_PG_PASS="pass"
@@ -38,6 +37,8 @@ sudo apt dist-upgrade -y
 sudo apt install -y \
     postgresql \
     libev-dev
+curl -LsSf https://releases.astral.sh/github/uv/releases/download/0.10.12/uv-installer.sh | sh
+source "$HOME"/.local/bin/env
 
 # Default creds for genesis notification services
 sudo -u postgres psql -c "CREATE ROLE $GC_PG_USER WITH LOGIN PASSWORD '$GC_PG_PASS';"
@@ -48,12 +49,9 @@ sudo mkdir -p $GC_CFG_DIR
 sudo cp "$GC_PATH/etc/genesis_notification/genesis_notification.conf" $GC_CFG_DIR/
 sudo cp "$GC_PATH/etc/genesis_notification/logging.yaml" $GC_CFG_DIR/
 
-mkdir -p "$VENV_PATH"
-python3 -m venv "$VENV_PATH"
+cd "$GC_PATH"
+uv sync
 source "$GC_PATH"/.venv/bin/activate
-pip install pip --upgrade
-pip install -r "$GC_PATH"/requirements.txt
-pip install -e "$GC_PATH"
 
 # Apply migrations
 ra-apply-migration --config-dir "$GC_PATH/etc/genesis_notification/" --path "$GC_PATH/migrations"
