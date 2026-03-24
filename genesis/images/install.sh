@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Copyright 2025 Genesis Corporation
+# Copyright 2026 Genesis developers.
 #
 # All Rights Reserved.
 #
@@ -72,3 +72,18 @@ sudo systemctl enable \
     genesis-notification-mail-agent \
     genesis-notification-builder-agent \
     genesis-notification-user-api
+
+
+cat <<EOT | sudo tee /etc/motd
+▄▖        ▘  
+▌ █▌▛▌█▌▛▘▌▛▘
+▙▌▙▖▌▌▙▖▄▌▌▄▌
+
+
+Welcome to genesis_notification node!
+
+
+The project page:
+https://github.com/infraguys/genesis_notification
+
+EOT

@@ -15,31 +15,16 @@ jobs:
       fail-fast: true
     steps:
       - uses: actions/checkout@v5
-      - name: Build Genesis Core
+        with:
+          fetch-depth: 30
+      - name: Build Genesis Notification
+        env:
+              PUSH_CFG: ${{ secrets.PUSH_CFG }}
         run: |
           set -eux
 
-          genesis build $(pwd)
+          genesis build $(pwd) --inventory
 
-          VERSION="$(genesis get-version .)"
-          
-          # Prepare `raw` and `raw.gz` images
-          cd output
-          qemu-img convert -f qcow2 genesis-notification.qcow2 -O raw genesis-notification.raw
-          gzip -5 -k < genesis-notification.raw > genesis-notification.raw.gz
-          
-          # Upload the VM images
-          curl -X PUT --upload-file genesis-notification.qcow2 \
-            ${REPO_ENDPOINT_PUT}/${PROJECT_NAME}/${VERSION}/genesis-notification.qcow2
-          curl -X PUT --upload-file genesis-notification.raw.gz \
-            ${REPO_ENDPOINT_PUT}/${PROJECT_NAME}/${VERSION}/genesis-notification.raw.gz
-          curl -X PUT --upload-file genesis-notification.raw \
-            ${REPO_ENDPOINT_PUT}/${PROJECT_NAME}/${VERSION}/genesis-notification.raw
-
-          sha256sum genesis-notification.qcow2 >> SHA256SUMS
-          sha256sum genesis-notification.raw.gz >> SHA256SUMS
-          sha256sum genesis-notification.raw >> SHA256SUMS
-
-          curl -X PUT --upload-file SHA256SUMS \
-            ${REPO_ENDPOINT_PUT}/${PROJECT_NAME}/${VERSION}/SHA256SUMS
-          cd -
+          # Decode and write the push configuration
+          echo "$PUSH_CFG" | base64 -d > genesis/genesis.push.yaml
+          genesis push -c genesis/genesis.push.yaml -t local -f
