@@ -24,9 +24,14 @@ loggers:
 
   exordos_notification: {}
   bjoern: {}
-  gcl_looper: {}
-  restalchemy: {}
-  sentry_sdk: {}
+  gcl_looper:
+    level: WARNING
+  gcl_sdk: {}
+  restalchemy:
+    level: INFO
+  psycopg: {}
+  bazooka:
+    level: WARNING
 
 root:
   handlers: [console]

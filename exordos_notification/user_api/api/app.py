@@ -31,7 +31,10 @@ from exordos_notification import version as app_version
 skip_auth_endpoints = [
     iam_mw.EndpointComparator("/"),
     iam_mw.EndpointComparator("/v1/"),
-    iam_mw.EndpointComparator("/v1/events/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", methods=["GET"]),
+    iam_mw.EndpointComparator(
+        "/v1/events/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
+        methods=["GET"],
+    ),
     iam_mw.EndpointComparator("/v1/events/", methods=["POST"]),
 ]
 
@@ -57,10 +60,9 @@ def get_openapi_engine():
         info=openapi_structures.OpenApiInfo(
             title=f"Exordos Notification {versions.API_VERSION_1_0} User API",
             version=app_version.version_info,
-            description=(f"OpenAPI - Exordos Notification {versions.API_VERSION_1_0}"),
+            description=f"OpenAPI - Exordos Notification {versions.API_VERSION_1_0}",
         ),
         paths=openapi_structures.OpenApiPaths(),
-        components=openapi_structures.OpenApiComponents(),
     )
     return openapi_engine
 
