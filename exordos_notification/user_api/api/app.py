@@ -15,18 +15,15 @@
 #    under the License.
 
 from gcl_iam import middlewares as iam_mw
-from restalchemy.api import applications
+from restalchemy.api import applications, middlewares, routes
 from restalchemy.api.middlewares import logging as logging_mw
-from restalchemy.api import middlewares
-from restalchemy.api import routes
-from restalchemy.openapi import structures as openapi_structures
 from restalchemy.openapi import engines as openapi_engines
+from restalchemy.openapi import structures as openapi_structures
 
+from exordos_notification import version as app_version
 from exordos_notification.common.api.middlewares import errors as errors_mw
 from exordos_notification.user_api.api import routes as app_routes
 from exordos_notification.user_api.api import versions
-from exordos_notification import version as app_version
-
 
 skip_auth_endpoints = [
     iam_mw.EndpointComparator("/"),

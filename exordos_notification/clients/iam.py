@@ -67,6 +67,12 @@ class IAMClient:
                 method, url, headers=self._auth_headers(), **kwargs
             )
         except Exception:
+            LOG.warning(
+                "Request %s %s failed, retrying with a fresh token",
+                method,
+                url,
+                exc_info=True,
+            )
             self._token = None
             self._token = self._get_token()
             resp = self._http.request(
