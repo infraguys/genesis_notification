@@ -16,24 +16,24 @@
 
 import datetime
 import logging
-from email.mime import text
-from email.mime import multipart
 import smtplib
 import ssl
+from email.mime import multipart, text
 
 import jinja2
-from gcl_sdk.agents.universal.dm import models as ua_models
-from restalchemy.dm import filters
-from restalchemy.dm import models
-from restalchemy.dm import properties
-from restalchemy.dm import relationships
-from restalchemy.dm import types
-from restalchemy.dm import types_dynamic
-from restalchemy.storage.sql import orm
 import zulip
+from gcl_sdk.agents.universal.dm import models as ua_models
+from restalchemy.dm import (
+    filters,
+    models,
+    properties,
+    relationships,
+    types,
+    types_dynamic,
+)
+from restalchemy.storage.sql import orm
 
 from exordos_notification.common import constants as c
-
 
 LOG = logging.getLogger(__name__)
 
@@ -207,7 +207,7 @@ class EventType(
 
 class AbstractContent(types_dynamic.AbstractKindModel):
     def get_id(self):
-        return "%s" % self.__class__.__name__.lower()
+        return self.__class__.__name__.lower()
 
 
 class RenderedEmailContent(AbstractContent):

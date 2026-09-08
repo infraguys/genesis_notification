@@ -16,7 +16,6 @@
 
 import enum
 
-
 GLOBAL_SERVICE_NAME = "exordos_notification"
 
 

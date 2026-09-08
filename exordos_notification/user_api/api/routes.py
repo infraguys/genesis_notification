@@ -14,6 +14,8 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import typing
+
 from restalchemy.api import routes
 
 from exordos_notification.user_api.api import controllers
@@ -39,7 +41,7 @@ class ApiEndpointRoute(routes.Route):
     """Handler for /v1.0/ endpoint"""
 
     __controller__ = controllers.ApiEndpointController
-    __allow_methods__ = [routes.FILTER]
+    __allow_methods__: typing.ClassVar[list] = [routes.FILTER]
 
     providers = routes.route(ProviderRoute)
     templates = routes.route(TemplateRoute)
